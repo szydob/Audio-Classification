@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "audio-classification"
+version = "0.1.0"
+description = "Simple audio classification with custom CNN on mel-spectrograms and SoTA baseline comparison"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "scipy>=1.12",
+    "scikit-learn>=1.5",
+    "matplotlib>=3.8",
+    "librosa>=0.10.2",
+    "soundfile>=0.12.1",
+    "torch>=2.3",
+    "torchaudio>=2.3",
+    "tqdm>=4.66",
+    "kagglehub>=0.3.3",
+    "streamlit>=1.35",
+]
+
+[project.optional-dependencies]
+sota = [
+    "transformers>=4.46",
+    "accelerate>=0.33",
+    "torchvision>=0.18",
+]
+
+[tool.audio_classification]
+default_dataset = "gtzan"
+
+[tool.audio_classification.datasets]
+gtzan = { source = "kagglehub", id = "andradaolteanu/gtzan-dataset-music-genre-classification" }
+# Add more datasets later, e.g.:
+# esc50 = { source = "local", path = "data/ESC-50" }
