@@ -18,7 +18,7 @@ from src.audio_classification.data import (
     audio_to_logmel,
     load_audio,
 )
-from src.audio_classification.models import run_cnn_baseline
+from audio_classification.cnn import run_cnn_baseline
 from src.audio_classification.sota import run_ast_logreg_baseline
 
 warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
