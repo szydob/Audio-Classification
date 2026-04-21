@@ -3,8 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
 
+import audioread
 import librosa
 import numpy as np
+import soundfile as sf
+from scipy.signal import resample_poly
 from sklearn.model_selection import train_test_split
 
 AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a"}
@@ -53,9 +56,40 @@ def scan_labeled_audio(
 
 
 def load_audio(path: str | Path, sr: int = SAMPLE_RATE, seconds: int = TARGET_SECONDS) -> np.ndarray:
-    """Load mono audio and pad/crop it to a fixed duration."""
-    y, _ = librosa.load(path, sr=sr, mono=True, duration=seconds)
+    """Load mono audio and pad/crop it to a fixed duration.
+
+    Uses a robust fallback chain to handle environments where one backend
+    cannot decode specific files: soundfile -> audioread -> zeros.
+    """
+    source_sr: int | None = None
     target_len = sr * seconds
+
+    try:
+        y, source_sr = sf.read(path, dtype="float32", always_2d=False)
+        if y.ndim > 1:
+            y = y.mean(axis=1)
+    except Exception:
+        try:
+            with audioread.audio_open(str(path)) as reader:
+                source_sr = reader.samplerate
+                chunks = []
+                for buffer in reader:
+                    chunks.append(np.frombuffer(buffer, dtype=np.int16))
+
+            if not chunks:
+                return np.zeros(target_len, dtype=np.float32)
+
+            y = np.concatenate(chunks).astype(np.float32) / 32768.0
+        except Exception:
+            return np.zeros(target_len, dtype=np.float32)
+
+    if source_sr is None:
+        return np.zeros(target_len, dtype=np.float32)
+
+    if source_sr != sr:
+        gcd = np.gcd(source_sr, sr)
+        y = resample_poly(y, sr // gcd, source_sr // gcd).astype(np.float32)
+
     y = np.pad(y, (0, max(0, target_len - len(y))))[:target_len]
     return y.astype(np.float32)
 
