@@ -11,12 +11,15 @@ import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
 
-from src.audio_classification.data import (
+
+from core.data.io import (
     scan_labeled_audio,
     split_files_train_val_test,
     audio_to_logmel,
     load_audio,
 )
+from core.models.cnn import run_cnn_baseline
+from core.models.sota import run_ast_logreg_baseline
 
 warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
 warnings.filterwarnings("ignore", category=UserWarning, module="librosa")
@@ -31,13 +34,18 @@ DATASET_ID = "andradaolteanu/gtzan-dataset-music-genre-classification"
 # Show summary of dataset split sizes and class balance in a simple table
 def show_split_summary() -> None:
     """Show split sizes and class balance in a simple table."""
-    if not all(key in st.session_state for key in ["train_files", "val_files", "test_files", "class_names"]):
+    if not all(
+        key in st.session_state
+        for key in ["train_files", "val_files", "test_files", "class_names"]
+    ):
         return
 
     class_names = st.session_state["class_names"]
     summary = pd.DataFrame(
         {
-            "train": np.bincount(st.session_state["y_train"], minlength=len(class_names)),
+            "train": np.bincount(
+                st.session_state["y_train"], minlength=len(class_names)
+            ),
             "val": np.bincount(st.session_state["y_val"], minlength=len(class_names)),
             "test": np.bincount(st.session_state["y_test"], minlength=len(class_names)),
         },
@@ -91,7 +99,9 @@ if "dataset_root" not in st.session_state:
 # Sidebar: dataset source and split parameters
 source = st.sidebar.selectbox("Dataset source", ["GTZAN (KaggleHub)", "Local folder"])
 train_val_fraction = st.sidebar.slider("Use for train+val (%)", 50, 95, 80, 5)
-val_fraction = st.sidebar.slider("Validation fraction inside used data", 0.05, 0.4, 0.2, 0.05)
+val_fraction = st.sidebar.slider(
+    "Validation fraction inside used data", 0.05, 0.4, 0.2, 0.05
+)
 
 if source == "GTZAN (KaggleHub)":
     if st.sidebar.button("Download / use GTZAN"):
@@ -106,7 +116,10 @@ st.info(f"Dataset root: {st.session_state.get('dataset_root')}")
 # Layout: left column shows split summary, right column shows random example
 cols = st.columns([1, 2])
 with cols[0]:
-    if all(key in st.session_state for key in ["train_files", "val_files", "test_files", "class_names"]):
+    if all(
+        key in st.session_state
+        for key in ["train_files", "val_files", "test_files", "class_names"]
+    ):
         show_split_summary()
 
 # Prepare stratified split on button click
@@ -116,11 +129,13 @@ if st.button("Prepare split"):
         st.error("Choose dataset first.")
     else:
         files, y, class_names = scan_labeled_audio(root_value)
-        train_files, val_files, test_files, y_train, y_val, y_test = split_files_train_val_test(
-            files,
-            y,
-            used_fraction=train_val_fraction / 100,
-            val_fraction_of_used=val_fraction,
+        train_files, val_files, test_files, y_train, y_val, y_test = (
+            split_files_train_val_test(
+                files,
+                y,
+                used_fraction=train_val_fraction / 100,
+                val_fraction_of_used=val_fraction,
+            )
         )
 
         st.session_state.update(
@@ -155,7 +170,9 @@ with cols[1]:
             candidates = files_all
 
         if not candidates:
-            st.warning("No audio files available — prepare split or set dataset root first.")
+            st.warning(
+                "No audio files available — prepare split or set dataset root first."
+            )
         else:
             file_path = random.choice(candidates)
             try:
@@ -174,7 +191,7 @@ if st.button("Run SoTA baseline"):
     else:
         with st.spinner("Classifying test set with AST..."):
             try:
-                from src.audio_classification.sota import run_ast_logreg_baseline
+                from core.models.sota import run_ast_logreg_baseline
 
                 # No action needed for last example — we don't persistently display it
                 results = run_ast_logreg_baseline(
@@ -205,7 +222,7 @@ if st.button("Run saved Mini AudioTransformer"):
     else:
         with st.spinner("Classifying test set with saved Mini AudioTransformer..."):
             try:
-                from src.audio_classification.transformer import run_saved_transformer_baseline
+                from core.models.transformer import run_saved_transformer_baseline
 
                 results = run_saved_transformer_baseline(
                     test_files=st.session_state["test_files"],
@@ -220,3 +237,55 @@ if st.button("Run saved Mini AudioTransformer"):
 if "mini_transformer_test_results" in st.session_state:
     st.subheader("Mini AudioTransformer test predictions")
     show_test_results(st.session_state["mini_transformer_test_results"])
+
+# CNN - running custom CNN and displaying results
+st.subheader("CNN baseline")
+
+cnn_col1, cnn_col2, cnn_col3 = st.columns(3)
+cnn_epochs = cnn_col1.slider("CNN epochs", min_value=1, max_value=30, value=5, step=1)
+cnn_batch_size = cnn_col2.selectbox("CNN batch size", options=[8, 16, 32, 64], index=2)
+cnn_lr = cnn_col3.selectbox(
+    "CNN learning rate", options=[1e-4, 3e-4, 1e-3, 3e-3], index=2
+)
+
+if st.button("Run CNN train + test"):
+    required = [
+        "train_files",
+        "val_files",
+        "test_files",
+        "y_train",
+        "y_val",
+        "y_test",
+        "class_names",
+    ]
+    if not all(key in st.session_state for key in required):
+        st.error("Prepare split first.")
+    else:
+        with st.spinner("Training CNN and evaluating test set..."):
+            try:
+                cnn_results, cnn_history = run_cnn_baseline(
+                    train_files=st.session_state["train_files"],
+                    y_train=st.session_state["y_train"],
+                    val_files=st.session_state["val_files"],
+                    y_val=st.session_state["y_val"],
+                    test_files=st.session_state["test_files"],
+                    y_test=st.session_state["y_test"],
+                    class_names=st.session_state["class_names"],
+                    epochs=cnn_epochs,
+                    batch_size=int(cnn_batch_size),
+                    lr=float(cnn_lr),
+                )
+                st.session_state["cnn_test_results"] = cnn_results
+                st.session_state["cnn_history"] = cnn_history
+                st.success("CNN training and test evaluation finished.")
+            except Exception as exc:
+                st.error(f"CNN run failed: {exc!r}")
+
+if "cnn_history" in st.session_state:
+    hist_df = pd.DataFrame(st.session_state["cnn_history"])
+    st.write("Training history")
+    st.line_chart(hist_df, width="stretch")
+
+if "cnn_test_results" in st.session_state:
+    st.subheader("CNN test predictions")
+    show_test_results(st.session_state["cnn_test_results"])

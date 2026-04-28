@@ -1,22 +1,19 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Sequence
+from typing import Dict, List, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
+from core.utils.audio import pick_device, safe_load_audio
 import torch
 from torch import nn
 
-from src.audio_classification.data import N_MELS, SAMPLE_RATE, TARGET_SECONDS, audio_to_logmel, load_audio
+from core.data.io import N_MELS, SAMPLE_RATE, TARGET_SECONDS, audio_to_logmel, load_audio
 
 
 def _pick_device() -> torch.device:
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    return torch.device("cpu")
+    return pick_device()
 
 
 class TransformerEncoderBlock(nn.Module):

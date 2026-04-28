@@ -22,7 +22,9 @@ def find_audio_files(dataset_root: str | Path) -> List[Path]:
     """Return all supported audio files found recursively in dataset_root."""
     root = Path(dataset_root)
     return sorted(
-        p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in AUDIO_EXTENSIONS
+        p
+        for p in root.rglob("*")
+        if p.is_file() and p.suffix.lower() in AUDIO_EXTENSIONS
     )
 
 
@@ -32,7 +34,9 @@ def infer_label(audio_path: Path, dataset_root: Path) -> str:
     return audio_path.parent.name if audio_path.parent.name else "unknown"
 
 
-def build_label_index(labels: Sequence[str]) -> Tuple[np.ndarray, List[str], Dict[str, int]]:
+def build_label_index(
+    labels: Sequence[str],
+) -> Tuple[np.ndarray, List[str], Dict[str, int]]:
     """Map string labels to integer ids and return encoded array plus mappings."""
     class_names = sorted(set(labels))
     class_to_idx = {name: idx for idx, name in enumerate(class_names)}
