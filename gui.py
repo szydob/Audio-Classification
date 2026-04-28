@@ -20,6 +20,7 @@ from src.audio_classification.data import (
 )
 from audio_classification.cnn import run_cnn_baseline
 from src.audio_classification.sota import run_ast_logreg_baseline
+from src.audio_classification.feature_model import run_feature_baseline
 
 warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
 warnings.filterwarnings("ignore", category=UserWarning, module="librosa")
@@ -208,6 +209,33 @@ if st.button("Run SoTA baseline"):
 if "ast_test_results" in st.session_state:
     st.subheader("Test predictions")
     show_test_results(st.session_state["ast_test_results"])
+
+
+# Feature-based baseline using extracted audio features
+st.subheader("Feature-based baseline")
+
+if st.button("Run feature baseline"):
+    required = ["train_files", "test_files", "y_train", "y_test", "class_names"]
+    if not all(key in st.session_state for key in required):
+        st.error("Prepare split first.")
+    else:
+        with st.spinner("Training feature-based classifier and evaluating test set..."):
+            try:
+                results = run_feature_baseline(
+                    train_files=st.session_state["train_files"],
+                    y_train=st.session_state["y_train"],
+                    test_files=st.session_state["test_files"],
+                    y_test=st.session_state["y_test"],
+                    class_names=st.session_state["class_names"],
+                )
+                st.session_state["feature_test_results"] = results
+                st.success("Feature-based classification finished.")
+            except Exception as exc:
+                st.error(f"Feature baseline failed: {exc!r}")
+
+if "feature_test_results" in st.session_state:
+    st.subheader("Feature baseline predictions")
+    show_test_results(st.session_state["feature_test_results"])
 
 
 # CNN - running custom CNN and displaying results
