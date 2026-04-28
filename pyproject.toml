@@ -37,3 +37,7 @@ default_dataset = "gtzan"
 gtzan = { source = "kagglehub", id = "andradaolteanu/gtzan-dataset-music-genre-classification" }
 # Add more datasets later, e.g.:
 # esc50 = { source = "local", path = "data/ESC-50" }
+
+[tool.hatch.build.targets.wheel]
+packages = ["core"]
+

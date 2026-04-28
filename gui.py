@@ -12,15 +12,15 @@ import streamlit as st
 import matplotlib.pyplot as plt
 
 
-from src.audio_classification.data import (
+from core.data.io import (
     scan_labeled_audio,
     split_files_train_val_test,
     audio_to_logmel,
     load_audio,
 )
-from audio_classification.cnn import run_cnn_baseline
-from src.audio_classification.sota import run_ast_logreg_baseline
-from src.audio_classification.feature_model import run_feature_baseline
+from core.models.cnn import run_cnn_baseline
+from core.models.sota import run_ast_logreg_baseline
+from core.models.feature_model import run_feature_baseline
 
 warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
 warnings.filterwarnings("ignore", category=UserWarning, module="librosa")
@@ -192,6 +192,8 @@ if st.button("Run SoTA baseline"):
     else:
         with st.spinner("Classifying test set with AST..."):
             try:
+                from core.models.sota import run_ast_logreg_baseline
+
                 # No action needed for last example — we don't persistently display it
                 results = run_ast_logreg_baseline(
                     train_files=st.session_state["train_files"],
@@ -237,6 +239,32 @@ if "feature_test_results" in st.session_state:
     st.subheader("Feature baseline predictions")
     show_test_results(st.session_state["feature_test_results"])
 
+
+# Mini AudioTransformer - load trained artifacts and run test predictions
+st.subheader("Mini AudioTransformer (saved artifacts)")
+
+if st.button("Run saved Mini AudioTransformer"):
+    required = ["test_files", "y_test", "class_names"]
+    if not all(key in st.session_state for key in required):
+        st.error("Prepare split first.")
+    else:
+        with st.spinner("Classifying test set with saved Mini AudioTransformer..."):
+            try:
+                from core.models.transformer import run_saved_transformer_baseline
+
+                results = run_saved_transformer_baseline(
+                    test_files=st.session_state["test_files"],
+                    y_test=st.session_state["y_test"],
+                    class_names=st.session_state["class_names"],
+                )
+                st.session_state["mini_transformer_test_results"] = results
+                st.success("Test set classified with saved Mini AudioTransformer.")
+            except Exception as exc:
+                st.error(f"Mini AudioTransformer failed: {exc!r}")
+
+if "mini_transformer_test_results" in st.session_state:
+    st.subheader("Mini AudioTransformer test predictions")
+    show_test_results(st.session_state["mini_transformer_test_results"])
 
 # CNN - running custom CNN and displaying results
 st.subheader("CNN baseline")

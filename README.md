@@ -31,13 +31,17 @@ uv run streamlit run gui.py
 
 ## What each file does
 
-- `src/audio_classification/data.py`
+- `core/data/io.py`
   - Scans labeled audio files.
   - Loads waveform and normalizes length.
   - Converts waveform to log-mel spectrogram.
-- `src/audio_classification/sota.py`
+- `core/models/sota.py`
   - Uses Hugging Face AST transformer as feature extractor.
   - Trains Logistic Regression on AST embeddings for comparison.
+- `core/models/cnn.py`
+  - Trains and evaluates CNN baseline on log-mel features.
+- `core/models/transformer.py`
+  - Runs the saved Mini AudioTransformer baseline.
 - `gui.py`
   - Pick dataset source (GTZAN or local folder).
   - Prepare train/validation split.
