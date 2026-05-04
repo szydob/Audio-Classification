@@ -90,3 +90,6 @@ htmlcov/
 # Local environment files
 .env
 .env.*
+
+# .wav files
+*.wav
