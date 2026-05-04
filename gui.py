@@ -20,7 +20,6 @@ from core.data.io import (
 )
 from core.models.cnn import run_cnn_baseline
 from core.models.sota import run_ast_logreg_baseline
-from core.models.feature_model import run_feature_bseline
 from core.models.feature_model import run_feature_baseline
 
 warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
@@ -107,7 +106,7 @@ def navigate_to(page: str) -> None:
 # Sidebar: Dataset Management (always visible)
 # ============================================================================
 
-st.sidebar.title("📊 Dataset Management")
+st.sidebar.title("Dataset Management")
 
 source = st.sidebar.selectbox("Dataset source", ["GTZAN (KaggleHub)", "Local folder"])
 train_val_fraction = st.sidebar.slider("Use for train+val (%)", 50, 95, 80, 5)
@@ -195,10 +194,9 @@ def page_home():
     with col1:
         st.markdown(
             """
-        <div style='padding: 20px; border: 2px solid #1f77b4; border-radius: 10px; background-color: #f0f2f6;'>
+        <div style='padding: 20px; border: 2px solid #1f77b4; border-radius: 10px; background-color: #000206;'>
             <h3>AST Baseline</h3>
-            <p>AudioSet Transformer with Logistic Regression</p>
-            <p>Fast pre-trained embeddings for audio classification</p>
+            <p>SotA Baseline</p>
         </div>
         """,
             unsafe_allow_html=True,
@@ -211,10 +209,9 @@ def page_home():
     with col2:
         st.markdown(
             """
-        <div style='padding: 20px; border: 2px solid #ff7f0e; border-radius: 10px; background-color: #f0f2f6;'>
+        <div style='padding: 20px; border: 2px solid #ff7f0e; border-radius: 10px; background-color: #000206;'>
             <h3>Feature-based Baseline</h3>
             <p>Hand-crafted Audio Features + Logistic Regression</p>
-            <p>MFCC, spectral features, chroma, and more</p>
         </div>
         """,
             unsafe_allow_html=True,
@@ -229,10 +226,9 @@ def page_home():
     with col3:
         st.markdown(
             """
-        <div style='padding: 20px; border: 2px solid #2ca02c; border-radius: 10px; background-color: #f0f2f6;'>
+        <div style='padding: 20px; border: 2px solid #2ca02c; border-radius: 10px; background-color: #000206;'>
             <h3>Mini AudioTransformer</h3>
             <p>Lightweight Custom Transformer Architecture</p>
-            <p>Load and run saved pre-trained artifacts</p>
         </div>
         """,
             unsafe_allow_html=True,
@@ -245,10 +241,9 @@ def page_home():
     with col4:
         st.markdown(
             """
-        <div style='padding: 20px; border: 2px solid #d62728; border-radius: 10px; background-color: #f0f2f6;'>
+        <div style='padding: 20px; border: 2px solid #d62728; border-radius: 10px; background-color: #000206;'>
             <h3>CNN Baseline</h3>
             <p>Custom Convolutional Neural Network</p>
-            <p>Train from scratch with configurable parameters</p>
         </div>
         """,
             unsafe_allow_html=True,
@@ -293,7 +288,7 @@ def page_ast():
             navigate_to("home")
             st.rerun()
     with col_title:
-        st.title("🔵 AST Baseline")
+        st.title("AST Baseline")
 
     st.markdown("---")
 
@@ -305,7 +300,7 @@ def page_ast():
     st.subheader("Configuration")
     st.info("AST Baseline uses an AudioSet pre-trained transformer with logistic regression on top.")
 
-    if st.button("▶️ Run SoTA (AST) Baseline", use_container_width=True):
+    if st.button("Run SoTA (AST) Baseline", use_container_width=True):
         with st.spinner("Classifying test set with AST..."):
             try:
                 results = run_ast_logreg_baseline(
@@ -341,7 +336,7 @@ def page_feature():
             navigate_to("home")
             st.rerun()
     with col_title:
-        st.title("🟠 Feature-based Baseline")
+        st.title("Feature-based Baseline")
 
     st.markdown("---")
 
@@ -356,7 +351,7 @@ def page_feature():
         "(MFCC, spectral features, chroma, etc.) and trains a logistic regression classifier."
     )
 
-    if st.button("▶️ Run Feature Baseline", use_container_width=True):
+    if st.button("Run Feature Baseline", use_container_width=True):
         with st.spinner("Training feature-based classifier..."):
             try:
                 results = run_feature_baseline(
@@ -392,47 +387,10 @@ def page_transformer():
             navigate_to("home")
             st.rerun()
     with col_title:
-        st.title("🟢 Mini AudioTransformer")
+        st.title("Mini AudioTransformer")
 
     st.markdown("---")
 
-# Show test results if available
-if "ast_test_results" in st.session_state:
-    st.subheader("Test predictions")
-    show_test_results(st.session_state["ast_test_results"])
-
-
-# Feature-based baseline using extracted audio features
-st.subheader("Feature-based baseline")
-
-if st.button("Run feature baseline"):
-    required = ["train_files", "test_files", "y_train", "y_test", "class_names"]
-    if not all(key in st.session_state for key in required):
-        st.error("Prepare split first.")
-    else:
-        with st.spinner("Training feature-based classifier and evaluating test set..."):
-            try:
-                results = run_feature_baseline(
-                    train_files=st.session_state["train_files"],
-                    y_train=st.session_state["y_train"],
-                    test_files=st.session_state["test_files"],
-                    y_test=st.session_state["y_test"],
-                    class_names=st.session_state["class_names"],
-                )
-                st.session_state["feature_test_results"] = results
-                st.success("Feature-based classification finished.")
-            except Exception as exc:
-                st.error(f"Feature baseline failed: {exc!r}")
-
-if "feature_test_results" in st.session_state:
-    st.subheader("Feature baseline predictions")
-    show_test_results(st.session_state["feature_test_results"])
-
-
-# Mini AudioTransformer - load trained artifacts and run test predictions
-st.subheader("Mini AudioTransformer (saved artifacts)")
-
-if st.button("Run saved Mini AudioTransformer"):
     required = ["test_files", "y_test", "class_names"]
     if not all(key in st.session_state for key in required):
         st.error("Prepare split first using the sidebar.")
@@ -444,7 +402,7 @@ if st.button("Run saved Mini AudioTransformer"):
         "This page runs inference using saved pre-trained artifacts."
     )
 
-    if st.button("▶️ Run Saved Mini AudioTransformer", use_container_width=True):
+    if st.button("Run Saved Mini AudioTransformer", use_container_width=True):
         with st.spinner("Classifying test set with saved Mini AudioTransformer..."):
             try:
                 from core.models.transformer import run_saved_transformer_baseline
@@ -480,7 +438,7 @@ def page_cnn():
             navigate_to("home")
             st.rerun()
     with col_title:
-        st.title("🔴 CNN Baseline")
+        st.title("CNN Baseline")
 
     st.markdown("---")
 
@@ -509,7 +467,7 @@ def page_cnn():
             "Learning rate", options=[1e-4, 3e-4, 1e-3, 3e-3], index=2
         )
 
-    if st.button("▶️ Train & Test CNN", use_container_width=True):
+    if st.button("Train & Test CNN", use_container_width=True):
         with st.spinner("Training CNN and evaluating test set..."):
             try:
                 cnn_results, cnn_history = run_cnn_baseline(
