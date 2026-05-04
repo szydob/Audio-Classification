@@ -411,7 +411,7 @@ def page_feature():
         # # Option to load saved model
         # st.markdown("---")
         st.subheader("Load Saved Model")
-        load_dir = st.text_input("Load directory", value="artifacts/feature_baseline_custom")
+        load_dir = st.text_input("Load directory", value="artifacts/feature_baseline")
         if st.button("Load & Evaluate Saved Model", use_container_width=True):
             with st.spinner("Loading saved model and evaluating..."):
                 try:
