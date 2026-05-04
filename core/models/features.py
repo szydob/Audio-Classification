@@ -5,7 +5,7 @@ from typing import Dict, List, Sequence
 
 import numpy as np
 import pandas as pd
-import librosa
+#import librosa
 
 from core.utils.audio import safe_load_audio
 from core.data.io import SAMPLE_RATE, HOP_LENGTH
