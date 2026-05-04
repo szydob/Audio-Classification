@@ -18,9 +18,10 @@ from core.data.io import (
     audio_to_logmel,
     load_audio,
 )
-from core.models.cnn import run_cnn_baseline
+from core.models.cnn import run_cnn_baseline, train_and_save_cnn_baseline, load_and_eval_cnn_baseline
 from core.models.sota import run_ast_logreg_baseline
-from core.models.feature_model import run_feature_baseline
+from core.models.feature_model import run_feature_baseline, train_and_save_feature_baseline, load_and_eval_feature_baseline
+from core.models.transformer import train_and_save_transformer_baseline, run_saved_transformer_baseline, run_transformer_baseline
 
 warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
 warnings.filterwarnings("ignore", category=UserWarning, module="librosa")
@@ -346,25 +347,84 @@ def page_feature():
         return
 
     st.subheader("Configuration")
-    st.info(
-        "Feature-based baseline extracts hand-crafted audio features "
-        "(MFCC, spectral features, chroma, etc.) and trains a logistic regression classifier."
-    )
+    # st.info(
+    #     "Feature-based baseline extracts hand-crafted audio features "
+    #     "(MFCC, spectral features, chroma, etc.) and trains a logistic regression classifier."
+    # )
 
-    if st.button("Run Feature Baseline", use_container_width=True):
-        with st.spinner("Training feature-based classifier..."):
-            try:
-                results = run_feature_baseline(
-                    train_files=st.session_state["train_files"],
-                    y_train=st.session_state["y_train"],
-                    test_files=st.session_state["test_files"],
-                    y_test=st.session_state["y_test"],
-                    class_names=st.session_state["class_names"],
-                )
-                st.session_state["feature_test_results"] = results
-                st.success("✅ Feature-based classification finished!")
-            except Exception as exc:
-                st.error(f"❌ Feature baseline failed: {exc!r}")
+    mode = st.radio("Mode", ["Quick Eval", "Train & Save"], horizontal=True)
+
+    if mode == "Train & Save":
+        required_full = [
+            "train_files", "val_files", "test_files",
+            "y_train", "y_val", "y_test", "class_names"
+        ]
+        if not all(key in st.session_state for key in required_full):
+            st.error("Prepare split first using the sidebar.")
+            return
+
+        st.subheader("Training Configuration")
+        col1, col2 = st.columns(2)
+        with col1:
+            save_dir = st.text_input("Save directory", value="artifacts/feature_baseline")
+
+        if st.button("Train & Save Feature Baseline", use_container_width=True):
+            with st.spinner("Training feature-based classifier..."):
+                try:
+                    results, history = train_and_save_feature_baseline(
+                        train_files=st.session_state["train_files"],
+                        y_train=st.session_state["y_train"],
+                        val_files=st.session_state["val_files"],
+                        y_val=st.session_state["y_val"],
+                        test_files=st.session_state["test_files"],
+                        y_test=st.session_state["y_test"],
+                        class_names=st.session_state["class_names"],
+                        save_dir=save_dir,
+                    )
+                    st.session_state["feature_test_results"] = results
+                    st.session_state["feature_history"] = history
+                    st.success("✅ Feature-based model trained and saved!")
+                except Exception as exc:
+                    st.error(f"❌ Training failed: {exc!r}")
+
+        if "feature_history" in st.session_state:
+            st.subheader("Training Metrics")
+            hist_df = pd.DataFrame(st.session_state["feature_history"])
+            st.line_chart(hist_df, use_container_width=True)
+
+    else:  # Quick Eval
+        # if st.button("Run Feature Baseline (Quick)", use_container_width=True):
+        #     with st.spinner("Training feature-based classifier..."):
+        #         try:
+        #             results = run_feature_baseline(
+        #                 train_files=st.session_state["train_files"],
+        #                 y_train=st.session_state["y_train"],
+        #                 test_files=st.session_state["test_files"],
+        #                 y_test=st.session_state["y_test"],
+        #                 class_names=st.session_state["class_names"],
+        #             )
+        #             st.session_state["feature_test_results"] = results
+        #             st.success("✅ Feature-based classification finished!")
+        #         except Exception as exc:
+        #             st.error(f"❌ Feature baseline failed: {exc!r}")
+
+        # # Option to load saved model
+        # st.markdown("---")
+        st.subheader("Load Saved Model")
+        load_dir = st.text_input("Load directory", value="artifacts/feature_baseline_custom")
+        if st.button("Load & Evaluate Saved Model", use_container_width=True):
+            with st.spinner("Loading saved model and evaluating..."):
+                try:
+                    results = load_and_eval_feature_baseline(
+                        test_files=st.session_state["test_files"],
+                        y_test=st.session_state["y_test"],
+                        class_names=st.session_state["class_names"],
+                        load_dir=load_dir,
+                    )
+                    st.session_state["feature_test_results"] = results
+                    st.success("✅ Loaded model evaluated successfully!")
+                except Exception as exc:
+                    st.error(f"❌ Loading failed: {exc!r}")
 
     st.markdown("---")
     st.subheader("Results")
@@ -391,37 +451,120 @@ def page_transformer():
 
     st.markdown("---")
 
-    required = ["test_files", "y_test", "class_names"]
-    if not all(key in st.session_state for key in required):
+    required_base = ["test_files", "y_test", "class_names"]
+    if not all(key in st.session_state for key in required_base):
         st.error("Prepare split first using the sidebar.")
         return
 
     st.subheader("Configuration")
-    st.info(
-        "Mini AudioTransformer is a lightweight custom transformer architecture. "
-        "This page runs inference using saved pre-trained artifacts."
-    )
+    # st.info(
+    #     "Mini AudioTransformer is a lightweight custom transformer architecture that processes log-mel spectrograms using patch embedding and transformer encoder blocks. Quick Eval trains a fresh model each time, Train & Save mode persists the model weights."
+    # )
 
-    if st.button("Run Saved Mini AudioTransformer", use_container_width=True):
-        with st.spinner("Classifying test set with saved Mini AudioTransformer..."):
-            try:
-                from core.models.transformer import run_saved_transformer_baseline
+    mode = st.radio("Mode", ["Quick Eval", "Train & Save"], horizontal=True)
 
-                results = run_saved_transformer_baseline(
-                    test_files=st.session_state["test_files"],
-                    y_test=st.session_state["y_test"],
-                    class_names=st.session_state["class_names"],
-                )
-                st.session_state["mini_transformer_test_results"] = results
-                st.success("✅ Test set classified with Mini AudioTransformer!")
-            except Exception as exc:
-                st.error(f"❌ Mini AudioTransformer failed: {exc!r}")
+    if mode == "Train & Save":
+        required_full = [
+            "train_files", "val_files", "test_files",
+            "y_train", "y_val", "y_test", "class_names"
+        ]
+        if not all(key in st.session_state for key in required_full):
+            st.error("Prepare split first using the sidebar.")
+            return
+
+        st.subheader("Training Configuration")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            tf_epochs = st.slider("Epochs", min_value=1, max_value=30, value=10, step=1)
+        with col2:
+            tf_batch_size = st.selectbox("Batch size", options=[8, 16, 32, 64], index=2)
+        with col3:
+            tf_lr = st.selectbox(
+                "Learning rate", options=[1e-4, 3e-4, 1e-3, 3e-3], index=2
+            )
+
+        save_dir = st.text_input("Save directory", value="artifacts/mini_audio_transformer_custom")
+
+        if st.button("Train & Save Mini AudioTransformer", use_container_width=True):
+            with st.spinner("Training Mini AudioTransformer..."):
+                try:
+                    results, history = train_and_save_transformer_baseline(
+                        train_files=st.session_state["train_files"],
+                        y_train=st.session_state["y_train"],
+                        val_files=st.session_state["val_files"],
+                        y_val=st.session_state["y_val"],
+                        test_files=st.session_state["test_files"],
+                        y_test=st.session_state["y_test"],
+                        class_names=st.session_state["class_names"],
+                        epochs=tf_epochs,
+                        batch_size=int(tf_batch_size),
+                        lr=float(tf_lr),
+                        save_dir=save_dir,
+                    )
+                    st.session_state["transformer_test_results"] = results
+                    st.session_state["transformer_history"] = history
+                    st.success("✅ Mini AudioTransformer trained and saved!")
+                except Exception as exc:
+                    st.error(f"❌ Training failed: {exc!r}")
+
+        if "transformer_history" in st.session_state:
+            st.subheader("Training History")
+            hist_df = pd.DataFrame(st.session_state["transformer_history"])
+            st.line_chart(hist_df, use_container_width=True)
+
+    else:  # Quick Eval
+        required_full = [
+            "train_files", "val_files", "test_files",
+            "y_train", "y_val", "y_test", "class_names"
+        ]
+        if not all(key in st.session_state for key in required_full):
+            st.error("Prepare split first using the sidebar.")
+            return
+
+        # if st.button("Run Transformer (Quick Eval)", use_container_width=True):
+        #     with st.spinner("Training Mini AudioTransformer (quick eval)..."):
+        #         try:
+        #             results, history = run_transformer_baseline(
+        #                 train_files=st.session_state["train_files"],
+        #                 y_train=st.session_state["y_train"],
+        #                 val_files=st.session_state["val_files"],
+        #                 y_val=st.session_state["y_val"],
+        #                 test_files=st.session_state["test_files"],
+        #                 y_test=st.session_state["y_test"],
+        #                 class_names=st.session_state["class_names"],
+        #             )
+        #             st.session_state["transformer_test_results"] = results
+        #             st.session_state["transformer_history"] = history
+        #             st.success("✅ Test set classified with Mini AudioTransformer!")
+        #         except Exception as exc:
+        #             st.error(f"❌ Mini AudioTransformer failed: {exc!r}")
+
+        # st.markdown("---")
+        st.subheader("Load Saved Model")
+        artifacts_dir = st.text_input(
+            "Artifacts directory",
+            value="artifacts/mini_audio_transformer"
+        )
+
+        if st.button("Load Saved Mini AudioTransformer", use_container_width=True):
+            with st.spinner("Classifying test set with saved Mini AudioTransformer..."):
+                try:
+                    results = run_saved_transformer_baseline(
+                        test_files=st.session_state["test_files"],
+                        y_test=st.session_state["y_test"],
+                        class_names=st.session_state["class_names"],
+                        artifacts_dir=artifacts_dir,
+                    )
+                    st.session_state["transformer_test_results"] = results
+                    st.success("✅ Test set classified with saved Mini AudioTransformer!")
+                except Exception as exc:
+                    st.error(f"❌ Loading failed: {exc!r}")
 
     st.markdown("---")
     st.subheader("Results")
 
-    if "mini_transformer_test_results" in st.session_state:
-        show_test_results(st.session_state["mini_transformer_test_results"])
+    if "transformer_test_results" in st.session_state:
+        show_test_results(st.session_state["transformer_test_results"])
     else:
         st.info("Run the model to see results.")
 
@@ -456,50 +599,101 @@ def page_cnn():
         return
 
     st.subheader("Configuration")
+    # st.info(
+    #     "CNN baseline trains a custom convolutional neural network on log-mel spectrograms. "
+    #     "Quick Eval trains a fresh model each time, Train & Save mode persists the model weights."
+    # )
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        cnn_epochs = st.slider("Epochs", min_value=1, max_value=30, value=5, step=1)
-    with col2:
-        cnn_batch_size = st.selectbox("Batch size", options=[8, 16, 32, 64], index=2)
-    with col3:
-        cnn_lr = st.selectbox(
-            "Learning rate", options=[1e-4, 3e-4, 1e-3, 3e-3], index=2
-        )
+    mode = st.radio("Mode", ["Quick Eval", "Train & Save"], horizontal=True)
 
-    if st.button("Train & Test CNN", use_container_width=True):
-        with st.spinner("Training CNN and evaluating test set..."):
-            try:
-                cnn_results, cnn_history = run_cnn_baseline(
-                    train_files=st.session_state["train_files"],
-                    y_train=st.session_state["y_train"],
-                    val_files=st.session_state["val_files"],
-                    y_val=st.session_state["y_val"],
-                    test_files=st.session_state["test_files"],
-                    y_test=st.session_state["y_test"],
-                    class_names=st.session_state["class_names"],
-                    epochs=cnn_epochs,
-                    batch_size=int(cnn_batch_size),
-                    lr=float(cnn_lr),
-                )
-                st.session_state["cnn_test_results"] = cnn_results
-                st.session_state["cnn_history"] = cnn_history
-                st.success("✅ CNN training and evaluation finished!")
-            except Exception as exc:
-                st.error(f"❌ CNN run failed: {exc!r}")
+    if mode == "Train & Save":
+        st.subheader("Training Configuration")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            cnn_epochs = st.slider("Epochs", min_value=1, max_value=30, value=5, step=1)
+        with col2:
+            cnn_batch_size = st.selectbox("Batch size", options=[8, 16, 32, 64], index=2)
+        with col3:
+            cnn_lr = st.selectbox(
+                "Learning rate", options=[1e-4, 3e-4, 1e-3, 3e-3], index=2
+            )
+
+        save_dir = st.text_input("Save directory", value="artifacts/cnn_baseline_custom")
+
+        if st.button("Train & Save CNN", use_container_width=True):
+            with st.spinner("Training CNN and saving weights..."):
+                try:
+                    cnn_results, cnn_history = train_and_save_cnn_baseline(
+                        train_files=st.session_state["train_files"],
+                        y_train=st.session_state["y_train"],
+                        val_files=st.session_state["val_files"],
+                        y_val=st.session_state["y_val"],
+                        test_files=st.session_state["test_files"],
+                        y_test=st.session_state["y_test"],
+                        class_names=st.session_state["class_names"],
+                        epochs=cnn_epochs,
+                        batch_size=int(cnn_batch_size),
+                        lr=float(cnn_lr),
+                        save_dir=save_dir,
+                    )
+                    st.session_state["cnn_test_results"] = cnn_results
+                    st.session_state["cnn_history"] = cnn_history
+                    st.success("✅ CNN trained and weights saved!")
+                except Exception as exc:
+                    st.error(f"❌ CNN training failed: {exc!r}")
+
+        if "cnn_history" in st.session_state:
+            st.markdown("---")
+            st.subheader("Training History")
+            hist_df = pd.DataFrame(st.session_state["cnn_history"])
+            st.line_chart(hist_df, use_container_width=True)
+
+    else:  # Quick Eval
+    #     if st.button("Run CNN (Quick Eval)", use_container_width=True):
+    #         with st.spinner("Training CNN and evaluating test set..."):
+    #             try:
+    #                 cnn_results, cnn_history = run_cnn_baseline(
+    #                     train_files=st.session_state["train_files"],
+    #                     y_train=st.session_state["y_train"],
+    #                     val_files=st.session_state["val_files"],
+    #                     y_val=st.session_state["y_val"],
+    #                     test_files=st.session_state["test_files"],
+    #                     y_test=st.session_state["y_test"],
+    #                     class_names=st.session_state["class_names"],
+    #                     epochs=5,
+    #                     batch_size=32,
+    #                     lr=1e-3,
+    #                 )
+    #                 st.session_state["cnn_test_results"] = cnn_results
+    #                 st.session_state["cnn_history"] = cnn_history
+    #                 st.success("✅ CNN evaluation finished!")
+    #             except Exception as exc:
+    #                 st.error(f"❌ CNN run failed: {exc!r}")
+
+        # Option to load saved model
+        # st.markdown("---")
+        st.subheader("Load Saved Model")
+        load_dir = st.text_input("Load directory", value="artifacts/cnn")
+        if st.button("Load & Evaluate Saved CNN", use_container_width=True):
+            with st.spinner("Loading saved CNN and evaluating..."):
+                try:
+                    cnn_results = load_and_eval_cnn_baseline(
+                        test_files=st.session_state["test_files"],
+                        y_test=st.session_state["y_test"],
+                        class_names=st.session_state["class_names"],
+                        load_dir=load_dir,
+                    )
+                    st.session_state["cnn_test_results"] = cnn_results
+                    st.success("✅ Loaded CNN evaluated successfully!")
+                except Exception as exc:
+                    st.error(f"❌ Loading failed: {exc!r}")
 
     st.markdown("---")
-
-    if "cnn_history" in st.session_state:
-        st.subheader("Training History")
-        hist_df = pd.DataFrame(st.session_state["cnn_history"])
-        st.line_chart(hist_df, use_container_width=True)
-
     st.subheader("Results")
     if "cnn_test_results" in st.session_state:
         show_test_results(st.session_state["cnn_test_results"])
     else:
-        st.info("Train the model to see results.")
+        st.info("Run the model to see results.")
 
 
 # ============================================================================

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
+import json
 
 import numpy as np
 import pandas as pd
@@ -226,3 +227,147 @@ def run_cnn_baseline(
         )
 
     return pd.DataFrame(rows), history
+
+
+def train_and_save_cnn_baseline(
+    train_files: Sequence[Path],
+    y_train: np.ndarray,
+    val_files: Sequence[Path],
+    y_val: np.ndarray,
+    test_files: Sequence[Path],
+    y_test: np.ndarray,
+    class_names: Sequence[str],
+    epochs: int,
+    batch_size: int,
+    lr: float,
+    save_dir: Path | str = "artifacts/cnn_baseline",
+) -> tuple[pd.DataFrame, Dict[str, List[float]]]:
+    """Train CNN, save weights, and return test predictions + training history."""
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    x_train = _files_to_cnn_inputs(train_files)
+    x_val = _files_to_cnn_inputs(val_files)
+    x_test = _files_to_cnn_inputs(test_files)
+
+    model, history, _ = train_cnn(
+        x_train=x_train,
+        y_train=y_train.astype(np.int64),
+        x_val=x_val,
+        y_val=y_val.astype(np.int64),
+        n_classes=len(class_names),
+        epochs=epochs,
+        batch_size=batch_size,
+        lr=lr,
+    )
+
+    device = pick_device()
+    model = model.to(device)
+    model.eval()
+
+    test_loader = DataLoader(
+        TensorDataset(
+            torch.from_numpy(x_test), torch.from_numpy(y_test.astype(np.int64))
+        ),
+        batch_size=batch_size,
+        shuffle=False,
+    )
+
+    y_pred: list[int] = []
+    y_conf: list[float] = []
+    with torch.no_grad():
+        for xb, _ in test_loader:
+            xb = xb.to(device)
+            logits = model(xb)
+            probs = torch.softmax(logits, dim=1)
+            pred = torch.argmax(probs, dim=1).cpu().numpy().tolist()
+            conf = torch.max(probs, dim=1).values.cpu().numpy().tolist()
+            y_pred.extend(int(p) for p in pred)
+            y_conf.extend(float(c) for c in conf)
+
+    rows = []
+    for path, true_idx, pred_idx, conf in zip(test_files, y_test, y_pred, y_conf):
+        rows.append(
+            {
+                "file": str(path),
+                "true_label": class_names[int(true_idx)],
+                "predicted_label": class_names[int(pred_idx)],
+                "correct": bool(int(true_idx) == int(pred_idx)),
+                "confidence": float(conf),
+            }
+        )
+
+    test_results = pd.DataFrame(rows)
+
+    # Save model and metadata
+    meta = {
+        "class_names": list(class_names),
+        "epochs": epochs,
+        "batch_size": batch_size,
+        "lr": lr,
+    }
+    torch.save(meta, save_dir / "meta.pt")
+    torch.save(model.state_dict(), save_dir / "cnn_best.pt")
+
+    return test_results, history
+
+
+def load_and_eval_cnn_baseline(
+    test_files: Sequence[Path],
+    y_test: np.ndarray,
+    class_names: Sequence[str] | None = None,
+    load_dir: Path | str = "artifacts/cnn_baseline",
+    batch_size: int = 32,
+) -> pd.DataFrame:
+    """Load saved CNN model and evaluate on test set."""
+    load_dir = Path(load_dir)
+
+    # Load model and metadata
+    meta = torch.load(load_dir / "meta.pt", map_location="cpu")
+    saved_class_names = meta.get("class_names", [])
+    active_class_names = list(class_names) if class_names is not None else saved_class_names
+
+    # Recreate model
+    model = CNN(n_classes=len(active_class_names))
+    state = torch.load(load_dir / "cnn_best.pt", map_location="cpu")
+    model.load_state_dict(state)
+
+    device = pick_device()
+    model = model.to(device)
+    model.eval()
+
+    # Prepare test data
+    x_test = _files_to_cnn_inputs(test_files)
+    test_loader = DataLoader(
+        TensorDataset(
+            torch.from_numpy(x_test), torch.from_numpy(y_test.astype(np.int64))
+        ),
+        batch_size=batch_size,
+        shuffle=False,
+    )
+
+    y_pred: list[int] = []
+    y_conf: list[float] = []
+    with torch.no_grad():
+        for xb, _ in test_loader:
+            xb = xb.to(device)
+            logits = model(xb)
+            probs = torch.softmax(logits, dim=1)
+            pred = torch.argmax(probs, dim=1).cpu().numpy().tolist()
+            conf = torch.max(probs, dim=1).values.cpu().numpy().tolist()
+            y_pred.extend(int(p) for p in pred)
+            y_conf.extend(float(c) for c in conf)
+
+    rows = []
+    for path, true_idx, pred_idx, conf in zip(test_files, y_test, y_pred, y_conf):
+        rows.append(
+            {
+                "file": str(path),
+                "true_label": active_class_names[int(true_idx)],
+                "predicted_label": active_class_names[int(pred_idx)],
+                "correct": bool(int(true_idx) == int(pred_idx)),
+                "confidence": float(conf),
+            }
+        )
+
+    return pd.DataFrame(rows)
