@@ -8,6 +8,8 @@ import pandas as pd
 from core.utils.audio import pick_device, safe_load_audio
 import torch
 from torch import nn
+from torch.utils.data import DataLoader, TensorDataset
+from sklearn.metrics import accuracy_score
 
 from core.data.io import N_MELS, SAMPLE_RATE, TARGET_SECONDS, audio_to_logmel, load_audio
 
@@ -198,3 +200,273 @@ def run_saved_transformer_baseline(
         )
 
     return pd.DataFrame(rows)
+
+
+def _files_to_transformer_inputs(files: Sequence[Path]) -> np.ndarray:
+    """Convert audio files to transformer-ready log-mel spectrograms: (N, 1, H, W)."""
+    x = []
+    for path in files:
+        y = load_audio(path, sr=SAMPLE_RATE, seconds=TARGET_SECONDS)
+        logmel = audio_to_logmel(y, sr=SAMPLE_RATE)
+        x.append(logmel[None, ...])
+    return np.stack(x).astype(np.float32)
+
+
+def train_transformer(
+    x_train: np.ndarray,
+    y_train: np.ndarray,
+    x_val: np.ndarray,
+    y_val: np.ndarray,
+    n_classes: int,
+    n_mels: int = N_MELS,
+    patch_mels: int = 16,
+    patch_time: int = 16,
+    embed_dim: int = 128,
+    depth: int = 6,
+    num_heads: int = 8,
+    epochs: int = 10,
+    batch_size: int = 32,
+    lr: float = 1e-3,
+) -> Tuple[MiniAudioTransformer, Dict[str, List[float]], float]:
+    """Train MiniAudioTransformer on log-mels."""
+    device = pick_device()
+    model = MiniAudioTransformer(
+        n_classes=n_classes,
+        n_mels=n_mels,
+        patch_mels=patch_mels,
+        patch_time=patch_time,
+        embed_dim=embed_dim,
+        depth=depth,
+        num_heads=num_heads,
+    ).to(device)
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, "max", patience=3, factor=0.5
+    )
+
+    train_loader = DataLoader(
+        TensorDataset(torch.from_numpy(x_train), torch.from_numpy(y_train)),
+        batch_size=batch_size,
+        shuffle=True,
+    )
+    val_loader = DataLoader(
+        TensorDataset(torch.from_numpy(x_val), torch.from_numpy(y_val)),
+        batch_size=batch_size,
+        shuffle=False,
+    )
+
+    criterion = nn.CrossEntropyLoss()
+    history: Dict[str, List[float]] = {"train_loss": [], "val_acc": []}
+    best_val_acc = 0.0
+
+    for _ in range(epochs):
+        model.train()
+        epoch_loss = 0.0
+        for xb, yb in train_loader:
+            xb = xb.to(device)
+            yb = yb.to(device)
+            optimizer.zero_grad()
+            logits = model(xb)
+            loss = criterion(logits, yb)
+            loss.backward()
+            optimizer.step()
+            epoch_loss += float(loss.item())
+
+        avg_loss = epoch_loss / max(1, len(train_loader))
+
+        # Validate
+        model.eval()
+        val_preds = []
+        val_targets = []
+        with torch.no_grad():
+            for xb, yb in val_loader:
+                xb = xb.to(device)
+                logits = model(xb)
+                pred = torch.argmax(logits, dim=1).cpu().numpy()
+                val_preds.append(pred)
+                val_targets.append(yb.numpy())
+
+        val_pred_all = np.concatenate(val_preds)
+        val_target_all = np.concatenate(val_targets)
+        val_acc = float(accuracy_score(val_target_all, val_pred_all))
+
+        scheduler.step(val_acc)
+        history["train_loss"].append(avg_loss)
+        history["val_acc"].append(val_acc)
+
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+
+    return model, history, best_val_acc
+
+
+def train_and_save_transformer_baseline(
+    train_files: Sequence[Path],
+    y_train: np.ndarray,
+    val_files: Sequence[Path],
+    y_val: np.ndarray,
+    test_files: Sequence[Path],
+    y_test: np.ndarray,
+    class_names: Sequence[str],
+    epochs: int = 10,
+    batch_size: int = 32,
+    lr: float = 1e-3,
+    save_dir: Path | str = "artifacts/mini_audio_transformer_custom",
+) -> Tuple[pd.DataFrame, Dict[str, List[float]]]:
+    """Train MiniAudioTransformer, save weights, and return test predictions + history."""
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    # Convert files to log-mel inputs
+    x_train = _files_to_transformer_inputs(train_files)
+    x_val = _files_to_transformer_inputs(val_files)
+    x_test = _files_to_transformer_inputs(test_files)
+
+    # Train model
+    model, history, _ = train_transformer(
+        x_train=x_train,
+        y_train=y_train.astype(np.int64),
+        x_val=x_val,
+        y_val=y_val.astype(np.int64),
+        n_classes=len(class_names),
+        epochs=epochs,
+        batch_size=batch_size,
+        lr=lr,
+    )
+
+    # Test predictions
+    device = pick_device()
+    model = model.to(device)
+    model.eval()
+
+    test_loader = DataLoader(
+        TensorDataset(
+            torch.from_numpy(x_test), torch.from_numpy(y_test.astype(np.int64))
+        ),
+        batch_size=batch_size,
+        shuffle=False,
+    )
+
+    y_pred_all = []
+    y_proba_all = []
+    with torch.no_grad():
+        for xb, _ in test_loader:
+            xb = xb.to(device)
+            logits = model(xb)
+            preds = torch.argmax(logits, dim=1).cpu().numpy()
+            probas = torch.softmax(logits, dim=1).cpu().numpy()
+            y_pred_all.append(preds)
+            y_proba_all.append(probas)
+
+    y_pred = np.concatenate(y_pred_all)
+    y_proba = np.concatenate(y_proba_all)
+
+    rows = []
+    for path, true_idx, pred_idx, pred_proba in zip(test_files, y_test, y_pred, y_proba):
+        rows.append(
+            {
+                "file": str(path),
+                "true_label": class_names[int(true_idx)],
+                "predicted_label": class_names[int(pred_idx)],
+                "correct": bool(int(true_idx) == int(pred_idx)),
+                "confidence": float(np.max(pred_proba)),
+            }
+        )
+
+    test_results = pd.DataFrame(rows)
+
+    # Save model and metadata
+    meta = {
+        "class_names": list(class_names),
+        "params": {
+            "N_MELS": N_MELS,
+            "PATCH_MELS": 16,
+            "PATCH_TIME": 16,
+            "EMBED_DIM": 128,
+            "DEPTH": 6,
+            "NUM_HEADS": 8,
+            "MLP_RATIO": 4.0,
+            "DROPOUT": 0.15,
+        },
+    }
+    torch.save(meta, save_dir / "meta.pt")
+    torch.save(model.state_dict(), save_dir / "mini_audio_transformer_best.pt")
+
+    return test_results, history
+
+
+def run_transformer_baseline(
+    train_files: Sequence[Path],
+    y_train: np.ndarray,
+    val_files: Sequence[Path],
+    y_val: np.ndarray,
+    test_files: Sequence[Path],
+    y_test: np.ndarray,
+    class_names: Sequence[str],
+) -> Tuple[pd.DataFrame, Dict[str, List[float]]]:
+    """Train MiniAudioTransformer with fixed params and return test predictions + history."""
+    # Fixed parameters for quick eval
+    epochs = 5
+    batch_size = 32
+    lr = 1e-3
+
+    # Convert files to log-mel inputs
+    x_train = _files_to_transformer_inputs(train_files)
+    x_val = _files_to_transformer_inputs(val_files)
+    x_test = _files_to_transformer_inputs(test_files)
+
+    # Train model
+    model, history, _ = train_transformer(
+        x_train=x_train,
+        y_train=y_train.astype(np.int64),
+        x_val=x_val,
+        y_val=y_val.astype(np.int64),
+        n_classes=len(class_names),
+        epochs=epochs,
+        batch_size=batch_size,
+        lr=lr,
+    )
+
+    # Test predictions
+    device = pick_device()
+    model = model.to(device)
+    model.eval()
+
+    test_loader = DataLoader(
+        TensorDataset(
+            torch.from_numpy(x_test), torch.from_numpy(y_test.astype(np.int64))
+        ),
+        batch_size=batch_size,
+        shuffle=False,
+    )
+
+    y_pred_all = []
+    y_proba_all = []
+    with torch.no_grad():
+        for xb, _ in test_loader:
+            xb = xb.to(device)
+            logits = model(xb)
+            preds = torch.argmax(logits, dim=1).cpu().numpy()
+            probas = torch.softmax(logits, dim=1).cpu().numpy()
+            y_pred_all.append(preds)
+            y_proba_all.append(probas)
+
+    y_pred = np.concatenate(y_pred_all)
+    y_proba = np.concatenate(y_proba_all)
+
+    rows = []
+    for path, true_idx, pred_idx, pred_proba in zip(test_files, y_test, y_pred, y_proba):
+        rows.append(
+            {
+                "file": str(path),
+                "true_label": class_names[int(true_idx)],
+                "predicted_label": class_names[int(pred_idx)],
+                "correct": bool(int(true_idx) == int(pred_idx)),
+                "confidence": float(np.max(pred_proba)),
+            }
+        )
+
+    test_results = pd.DataFrame(rows)
+
+    return test_results, history
